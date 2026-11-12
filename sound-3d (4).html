@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="bn"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>৩ডি সাউন্ড ল্যান্ডস্কেপ</title>
+<style>
+:root{--ink:#e9ecff;--dim:#8d96c9;--line:rgba(120,140,255,.28);--glass:rgba(8,10,30,.55);--hot:#ff5fa8;--cool:#45e0ff}
+html,body{margin:0;height:100%;background:#04050d;color:var(--ink);font-family:"Hind Siliguri","Noto Sans Bengali",system-ui,sans-serif;overflow:hidden}
+canvas{display:block;touch-action:none}
+#top{position:fixed;top:0;left:0;right:0;padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  background:linear-gradient(180deg,rgba(4,5,13,.85),rgba(4,5,13,0));pointer-events:none}
+#top>*{pointer-events:auto}
+button,label.btn{background:var(--glass);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:8px 14px;
+  font:inherit;font-size:14px;cursor:pointer;backdrop-filter:blur(8px);transition:border-color .15s,background .15s}
+button:hover,label.btn:hover{border-color:var(--cool)}
+button:focus-visible,label.btn:focus-within,input[type=range]:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
+button:disabled{opacity:.35;cursor:default}
+#bRec.on{background:#a0123a;border-color:#ff6b8f}
+#bFollow.on{border-color:var(--cool);color:var(--cool)}
+#info{font-size:13px;color:var(--dim);max-width:40ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input[type=file]{display:none}
+#bar{position:fixed;left:0;right:0;bottom:0;padding:14px 16px 18px;display:flex;align-items:center;gap:12px;
+  background:linear-gradient(0deg,rgba(4,5,13,.9),rgba(4,5,13,0))}
+#tm{font-variant-numeric:tabular-nums;font-size:13px;color:var(--dim);min-width:92px;text-align:center}
+#seek{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:4px;outline:none;
+  background:linear-gradient(90deg,var(--cool) var(--p,0%),rgba(255,255,255,.14) var(--p,0%))}
+#seek::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 0 12px var(--cool);border:0}
+#seek::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 0 12px var(--cool);border:0}
+#hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;color:var(--dim);font-size:16px;line-height:1.7;pointer-events:none;transition:opacity .4s}
+#hint b{display:block;font-size:26px;color:var(--ink);font-weight:600;margin-bottom:6px}
+#tip{position:fixed;right:14px;bottom:62px;font-size:12px;color:var(--dim);text-align:right;pointer-events:none;opacity:.8}
+@media(max-width:600px){#tip{display:none}#info{max-width:100%}}
+</style></head><body>
+<div id="top">
+  <label class="btn">🎵 MP3 বেছে নিন<input type="file" id="fileIn" accept="audio/*"></label>
+  <button id="bPlay" disabled>▶ চালান</button>
+  <button id="bCine" class="on">🎬 সিনেমাটিক</button>
+  <button id="bFollow" class="on">🎥 অনুসরণ</button>
+  <button id="bMode">🎨 মোড: মেশ</button>
+  <button id="bRec" disabled>⏺ রেকর্ড শুরু</button>
+  <span id="info"></span>
+</div>
+<div id="hint"><b>সম্পূর্ণ গান, একটি ৩ডি পাহাড়ে</b>শুরু করতে একটি MP3 ফাইল বেছে নিন</div>
+<div id="tip">ক্যামেরা নিজে চলে; টানলে ৩ সেকেন্ড থামে · জুম করতে স্ক্রল · পাহাড়ে ক্লিক করলে সেখান থেকে বাজবে</div>
+<div id="bar">
+  <span id="tm">0:00 / 0:00</span>
+  <input type="range" id="seek" min="0" max="1000" value="0" disabled aria-label="গানের অবস্থান">
+</div>
+<audio id="audio"></audio>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const F = 84;                 // ফ্রিকোয়েন্সি সারি
+const LEN = 72, WID = 22;     // মেশের দৈর্ঘ্য (সময়) ও প্রস্থ (ফ্রিকোয়েন্সি)
+const MAXH = 8;               // সর্বোচ্চ উচ্চতা
+
+// ---------- দৃশ্য ----------
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const cv = renderer.domElement;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04050d);
+scene.fog = new THREE.FogExp2(0x04050d, 0.0105);
+const cam = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, .1, 400);
+
+scene.add(new THREE.AmbientLight(0x8890ff, .75));
+const sun = new THREE.DirectionalLight(0xffd6f0, .55); sun.position.set(-20, 40, 25); scene.add(sun);
+const glowLight = new THREE.PointLight(0x45e0ff, 2.2, 22, 1.6); scene.add(glowLight);
+
+// মেঝের গ্রিড
+const grid = new THREE.GridHelper(LEN+16, 36, 0x3445ff, 0x151a55);
+grid.position.y = -0.02; grid.material.transparent = true; grid.material.opacity = .35; scene.add(grid);
+
+// তারা
+(function(){
+  const n = 700, a = new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const r = 130+Math.random()*60, u = Math.random()*Math.PI*2, v = Math.acos(Math.random()*0.9+0.05);
+    a[i*3]=r*Math.sin(v)*Math.cos(u); a[i*3+1]=r*Math.cos(v); a[i*3+2]=r*Math.sin(v)*Math.sin(u);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(a,3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({color:0x9fb0ff,size:.9,sizeAttenuation:false,transparent:true,opacity:.55,fog:false})));
+})();
+
+// প্লেহেড: আলোর পর্দা + পাহাড়ের গা ঘেঁষা রেখা + উজ্জ্বল বিন্দু
+const sheetMat = new THREE.MeshBasicMaterial({color:0x45e0ff, transparent:true, opacity:.10, side:THREE.DoubleSide, depthWrite:false, blending:THREE.AdditiveBlending});
+const sheetGeo = new THREE.PlaneGeometry(WID+2, MAXH*1.35); sheetGeo.rotateY(Math.PI/2); sheetGeo.translate(0, MAXH*.675, 0);
+const sheet = new THREE.Mesh(sheetGeo, sheetMat); scene.add(sheet);
+
+const prof = new Float32Array(F*3);
+const profGeo = new THREE.BufferGeometry(); profGeo.setAttribute('position', new THREE.BufferAttribute(prof,3));
+const profLine = new THREE.Line(profGeo, new THREE.LineBasicMaterial({color:0xffffff, fog:false}));
+const profGlow = new THREE.Line(profGeo, new THREE.LineBasicMaterial({color:0x45e0ff, transparent:true, opacity:.5, blending:THREE.AdditiveBlending, depthWrite:false, fog:false}));
+profGlow.position.y = .12; profLine.position.y = .06;
+const profPts = new THREE.Points(profGeo, new THREE.PointsMaterial({color:0xffffff,size:4,sizeAttenuation:false,transparent:true,opacity:.9,fog:false}));
+profPts.position.y = .06;
+const base = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,-WID/2-1),new THREE.Vector3(0,0,WID/2+1)]),
+  new THREE.LineBasicMaterial({color:0xff5fa8, fog:false}));
+[profLine, profGlow, profPts, base].forEach(o => { o.visible = false; scene.add(o); });
+sheet.visible = glowLight.visible = false;
+
+// ---------- মেশ ----------
+let T = 0, Hh = null, solid = null, wire = null, geo = null;
+
+function palette(t, out){
+  const S = [[0,.04,.06,.28],[.22,.08,.25,.86],[.48,.62,.17,.9],[.72,1,.36,.45],[.9,1,.78,.35],[1,1,.97,.85]];
+  t = Math.min(1, Math.max(0, t));
+  let i = 0; while(i < S.length-2 && t > S[i+1][0]) i++;
+  const a = S[i], b = S[i+1], k = (t-a[0])/(b[0]-a[0]);
+  out.r = a[1]+(b[1]-a[1])*k; out.g = a[2]+(b[2]-a[2])*k; out.b = a[3]+(b[3]-a[3])*k;
+}
+
+function buildMesh(G){            // G[ix*F + f] : 0..1
+  if(solid){ scene.remove(solid, wire); geo.dispose(); }
+  geo = new THREE.PlaneGeometry(LEN, WID, T-1, F-1);
+  geo.rotateX(-Math.PI/2);
+  const pos = geo.attributes.position, colArr = new Float32Array(pos.count*3);
+  Hh = new Float32Array(pos.count);
+  const c = {r:0,g:0,b:0};
+  for(let iy=0; iy<F; iy++){
+    const f = F-1-iy;             // বেজ সামনে, ট্রেবল পেছনে
+    for(let ix=0; ix<T; ix++){
+      const i = iy*T+ix, v = G[ix*F+f], h = v*MAXH;
+      Hh[i] = h; pos.setY(i, h);
+      palette(v, c); colArr[i*3]=c.r; colArr[i*3+1]=c.g; colArr[i*3+2]=c.b;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colArr,3));
+  geo.computeVertexNormals();
+  solid = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({vertexColors:true, polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1}));
+  wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({color:0xbfd0ff, wireframe:true, transparent:true, opacity:.10, depthWrite:false}));
+  scene.add(solid, wire);
+  [profLine, profGlow, profPts, base].forEach(o => o.visible = true);
+  sheet.visible = glowLight.visible = true;
+}
+
+
+// ---------- নোড মোড: ৬০ ফ্রেম/সেকেন্ডে নমুনা → ৩ডি বিন্দু ও সংযোগ ----------
+let mode = 'mesh', NP = null, nodeObj = null, lineObj = null, headObj = null, headTex = null;
+const nodeU = {uHead:{value:0}, uTrail:{value:260}, uPx:{value:renderer.getPixelRatio()}};
+const vsP = 'attribute float aIdx;attribute float aAmp;attribute vec3 aCol;uniform float uHead,uTrail,uPx;varying vec3 vC;varying float vA;'+
+ 'void main(){float d=uHead-aIdx;vA=d<0.?0.:mix(.16,1.,exp(-d/uTrail));vC=aCol;vec4 mv=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mv;'+
+ 'gl_PointSize=(1.6+aAmp*5.)*uPx*(70./-mv.z)*((d>=0.&&d<14.)?1.7:1.);}';
+const fsP = 'varying vec3 vC;varying float vA;void main(){float r=length(gl_PointCoord-.5);if(r>.5||vA<=0.)discard;gl_FragColor=vec4(vC*(.8+vA),vA*smoothstep(.5,.05,r));}';
+const vsL = 'attribute float aIdx;attribute float aW;attribute vec3 aCol;uniform float uHead,uTrail;varying vec3 vC;varying float vA;'+
+ 'void main(){float d=uHead-aIdx;vA=(d<0.?0.:mix(.07,1.,exp(-d/uTrail)))*aW;vC=aCol;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}';
+const fsL = 'varying vec3 vC;varying float vA;void main(){if(vA<=0.)discard;gl_FragColor=vec4(vC*1.3,vA*.7);}';
+function mat(vs, fs){ return new THREE.ShaderMaterial({vertexShader:vs, fragmentShader:fs, uniforms:nodeU, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending}); }
+(function(){
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32,32,0,32,32,32); gr.addColorStop(0,'#fff'); gr.addColorStop(.25,'rgba(160,240,255,.8)'); gr.addColorStop(1,'rgba(69,224,255,0)');
+  g.fillStyle = gr; g.fillRect(0,0,64,64); headTex = new THREE.CanvasTexture(c);
+})();
+
+function buildNodes(S){
+  [nodeObj, lineObj, headObj].forEach(o => { if(o){ scene.remove(o); o.geometry.dispose(); } });
+  const step = Math.max(1, Math.ceil(ENV.length/30000)), n = Math.floor(ENV.length/step), dt = step/60;
+  const bnd = new Float32Array(T*4);                         // প্রতি সময়-কলামে বেজ/মিড/ট্রেবল/সেন্ট্রয়েড
+  for(let k=0;k<T;k++){
+    let b=0,m=0,t=0,w=0,cw=0;
+    for(let f=0;f<F;f++){ const v=S[k*F+f], r=f/F; if(r<.25)b+=v; else if(r<.6)m+=v; else t+=v; w+=v; cw+=v*r; }
+    bnd[k*4]=b/(F*.25); bnd[k*4+1]=m/(F*.35); bnd[k*4+2]=t/(F*.4); bnd[k*4+3]=w>1e-6?cw/w:.4;
+  }
+  const P = new Float32Array(n*3), C = new Float32Array(n*3), A = new Float32Array(n), I = new Float32Array(n), c = {r:0,g:0,b:0};
+  let pB=0, pM=0, pT=0;
+  for(let i=0;i<n;i++){
+    const t = i*dt, u = Math.min(1, t/songDur)*(T-1), k0 = Math.min(T-2, u|0), kf = u-k0;
+    const g = j => bnd[k0*4+j]*(1-kf) + bnd[(k0+1)*4+j]*kf;
+    const bass = g(0), mid = g(1), tre = g(2), cen = g(3), a = ENV[i*step];
+    pB += dt*(1.1+bass*5); pM += dt*(2.2+mid*6); pT += dt*(7+tre*14);    // অডিও-চালিত দোলন
+    const R = 1.2 + a*7.5;
+    P[i*3]   = (t/songDur-.5)*LEN + Math.cos(pM)*bass*3.2;
+    P[i*3+1] = 5 + (cen-.4)*7 + R*Math.cos(pB)*.75;
+    P[i*3+2] = R*Math.sin(pB + .7*Math.sin(pM)) + Math.sin(pT)*tre*3;
+    palette(Math.min(1, a*.65 + cen*.45), c);
+    C[i*3]=c.r; C[i*3+1]=c.g; C[i*3+2]=c.b; A[i]=a; I[i]=i;
+  }
+  const lp = [], lc = [], li = [], lw = [];
+  const seg = (a, b, w) => {
+    for(const q of [a,b]){ lp.push(P[q*3],P[q*3+1],P[q*3+2]); lc.push(C[q*3],C[q*3+1],C[q*3+2]); li.push(b); lw.push(w); }
+  };
+  for(let i=1;i<n;i++){
+    seg(i-1, i, 1);
+    for(const L of [9, 27, 72]){
+      if(i < L) continue;
+      const dx=P[i*3]-P[(i-L)*3], dy=P[i*3+1]-P[(i-L)*3+1], dz=P[i*3+2]-P[(i-L)*3+2];
+      if(dx*dx+dy*dy+dz*dz < 30) seg(i-L, i, .5);      // কাছাকাছি নোডগুলোর মধ্যে সেতু
+    }
+  }
+  const pg = new THREE.BufferGeometry();
+  pg.setAttribute('position', new THREE.BufferAttribute(P,3)); pg.setAttribute('aCol', new THREE.BufferAttribute(C,3));
+  pg.setAttribute('aAmp', new THREE.BufferAttribute(A,1));    pg.setAttribute('aIdx', new THREE.BufferAttribute(I,1));
+  nodeObj = new THREE.Points(pg, mat(vsP, fsP)); nodeObj.frustumCulled = false;
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.Float32BufferAttribute(lp,3)); lg.setAttribute('aCol', new THREE.Float32BufferAttribute(lc,3));
+  lg.setAttribute('aIdx', new THREE.Float32BufferAttribute(li,1));     lg.setAttribute('aW', new THREE.Float32BufferAttribute(lw,1));
+  lineObj = new THREE.LineSegments(lg, mat(vsL, fsL)); lineObj.frustumCulled = false;
+  const hg = new THREE.BufferGeometry(); hg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3),3));
+  headObj = new THREE.Points(hg, new THREE.PointsMaterial({size:26, sizeAttenuation:false, map:headTex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending}));
+  headObj.frustumCulled = false;
+  scene.add(nodeObj, lineObj, headObj);
+  NP = {P, A, n};
+}
+
+
+// ---------- স্থির কেন্দ্র থেকে ৩ডি শিল্পরূপ: গোলক · গ্যালাক্সি · ঢেউ-বলয় ----------
+// স্পেকট্রোগ্রাম একটি টেক্সচার; জিপিইউ প্রতি বিন্দুর অবস্থান, রং ও আকার সেখান থেকে হিসেব করে
+const U = {uSpec:{value:new THREE.DataTexture(new Uint8Array([0]),1,1,THREE.LuminanceFormat)}, uT:{value:0}, uTime:{value:0}, uAmp:{value:0}, uPx:{value:renderer.getPixelRatio()}};
+const orbU = {...U, uLag:{value:.01}}, galU = {...U, uTr:{value:.02}}, ringU = {...U, uLag:{value:.03}};
+const GH = 'uniform sampler2D uSpec;uniform float uT,uTime,uAmp,uPx,uLag,uTr;varying vec3 vC;varying float vA;'+
+ 'vec3 pal(float t){t=clamp(t,0.,1.);vec3 a=vec3(.04,.06,.28),b=vec3(.08,.25,.86),c=vec3(.62,.17,.9),d=vec3(1.,.36,.45),e=vec3(1.,.78,.35),f=vec3(1.,.97,.85);'+
+ 'if(t<.22)return mix(a,b,t/.22);if(t<.48)return mix(b,c,(t-.22)/.26);if(t<.72)return mix(c,d,(t-.48)/.24);if(t<.9)return mix(d,e,(t-.72)/.18);return mix(e,f,(t-.9)/.1);}'+
+ 'float spec(float t,float f){return texture2D(uSpec,vec2(clamp(t,0.,1.),clamp(f,0.,1.))).r;}'+
+ 'mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}';
+const vsOrb = GH+`attribute vec3 aDir;attribute float aSeed;
+void main(){
+  float lon=atan(aDir.z,aDir.x)/6.28318+.5, f=1.-acos(abs(aDir.y))/1.5708;
+  float v=spec(uT-lon*uLag,f);
+  float r=5.+v*9.+aSeed*v*3.+sin(lon*31.+uTime*2.2+f*8.)*.3*(.2+uAmp);
+  vec3 p=aDir*r; p.xz=rot(uTime*.1)*p.xz;
+  vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.85+f*.2); vA=.2+v*.9; gl_PointSize=(1.3+v*4.5)*uPx*(70./-mv.z);
+}`;
+const vsGal = GH+`attribute vec2 aUV;
+void main(){
+  float v=spec(aUV.x,aUV.y), d=uT-aUV.x, r=2.5+aUV.x*34.+v*1.6;
+  float ang=aUV.y*6.28318+aUV.x*9.+uTime*.04;
+  vec3 p=vec3(cos(ang)*r, v*7.+sin(aUV.y*40.+aUV.x*50.)*.12, sin(ang)*r);
+  vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.85+aUV.y*.2);
+  vA=d<0.?0.:mix(.22,1.,exp(-d/uTr))*(.12+smoothstep(.03,.3,v));
+  gl_PointSize=d<0.?0.:(1.2+v*4.5)*uPx*(70./-mv.z)*(d<.004?2.:1.);
+}`;
+const vsRing = GH+`attribute vec2 aUV;
+void main(){
+  float a=aUV.x, f=abs(aUV.y*2.-1.), th=aUV.y*6.28318+a*1.4+uTime*.08;
+  float v=spec(uT-a*uLag,f), rad=2.5+a*32.+v*2.5;
+  vec3 p=vec3(cos(th)*rad, v*8.*(1.-a*.55)+sin(th*3.+uTime)*.15*uAmp, sin(th)*rad);
+  vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.9+(1.-a)*.12); vA=pow(1.-a,1.3)*(.3+v); gl_PointSize=(1.2+v*3.5)*uPx*(70./-mv.z);
+}`;
+const fsPt2 = 'varying vec3 vC;varying float vA;void main(){float r=length(gl_PointCoord-.5);if(r>.5||vA<.01)discard;gl_FragColor=vec4(vC*(.7+vA*.8),vA*smoothstep(.5,.0,r));}';
+const fsLn2 = 'varying vec3 vC;varying float vA;void main(){if(vA<.01)discard;gl_FragColor=vec4(vC*1.2,vA*.55);}';
+const mk2 = (vs, fs, u) => new THREE.ShaderMaterial({vertexShader:vs, fragmentShader:fs, uniforms:u, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending});
+function geoFrom(n, attrs){
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n*3),3));
+  for(const k in attrs) g.setAttribute(k, new THREE.BufferAttribute(attrs[k][0], attrs[k][1]));
+  return g;
+}
+function addObj(o){ o.frustumCulled = false; o.visible = false; scene.add(o); return o; }
+
+const orbObj = (function(){
+  const n = 14000, d = new Float32Array(n*3), sd = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const y = 1-2*(i+.5)/n, r = Math.sqrt(1-y*y), ph = i*2.399963;
+    d[i*3]=Math.cos(ph)*r; d[i*3+1]=y; d[i*3+2]=Math.sin(ph)*r; sd[i]=Math.random();
+  }
+  return addObj(new THREE.Points(geoFrom(n,{aDir:[d,3],aSeed:[sd,1]}), mk2(vsOrb,fsPt2,orbU)));
+})();
+const galObj = (function(){
+  const TG = 440, FG = 96, uv = new Float32Array(TG*FG*2);
+  for(let i=0;i<TG;i++) for(let j=0;j<FG;j++){
+    const q = (i*FG+j)*2; uv[q] = Math.min(1,(i+Math.random())/TG); uv[q+1] = Math.min(1,(j+Math.random())/FG);
+  }
+  return addObj(new THREE.Points(geoFrom(TG*FG,{aUV:[uv,2]}), mk2(vsGal,fsPt2,galU)));
+})();
+const galRing = (function(){
+  const a = []; for(let i=0;i<=256;i++){ const t = i/256*Math.PI*2; a.push(Math.cos(t),0,Math.sin(t)); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(a,3));
+  const l = new THREE.Line(g, new THREE.LineBasicMaterial({color:0x45e0ff, transparent:true, opacity:.8, blending:THREE.AdditiveBlending, depthWrite:false, fog:false}));
+  l.position.y = .1; return addObj(l);
+})();
+const coreObj = (function(){
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3),3));
+  return addObj(new THREE.Points(g, new THREE.PointsMaterial({size:50, sizeAttenuation:false, map:headTex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, opacity:.9, fog:false})));
+})();
+const ringPts = (function(){
+  const R = 150, S = 160, a = [];
+  for(let j=0;j<R;j++) for(let k=0;k<=S;k++) a.push(j/(R-1), k/S);
+  return addObj(new THREE.Points(geoFrom(R*(S+1),{aUV:[new Float32Array(a),2]}), mk2(vsRing,fsPt2,ringU)));
+})();
+const ringLines = (function(){
+  const R = 150, S = 160, a = [];
+  for(let j=0;j<R;j++) for(let k=0;k<S;k++){
+    a.push(j/(R-1),k/S, j/(R-1),(k+1)/S);
+    if(k%8===0 && j<R-1) a.push(j/(R-1),k/S, (j+1)/(R-1),k/S);
+  }
+  return addObj(new THREE.LineSegments(geoFrom(a.length/2,{aUV:[new Float32Array(a),2]}), mk2(vsRing,fsLn2,ringU)));
+})();
+
+function makeSpecTex(G){
+  const d = new Uint8Array(T*F);
+  for(let k=0;k<T;k++) for(let f=0;f<F;f++) d[f*T+k] = Math.round(G[k*F+f]*255);
+  const tex = new THREE.DataTexture(d, T, F, THREE.LuminanceFormat, THREE.UnsignedByteType);
+  tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.unpackAlignment = 1;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true;
+  if(U.uSpec.value.dispose) U.uSpec.value.dispose();
+  U.uSpec.value = tex;                                   // শেয়ার্ড uniform — সব মোড একসাথে পায়
+  orbU.uLag.value = 1.5/songDur; ringU.uLag.value = 6/songDur; galU.uTr.value = 4/songDur;
+  knotU.uLag.value = 2.5/songDur; manU.uLag.value = 5/songDur; vorU.uLag.value = 8/songDur; cageU.uLag.value = 2/songDur; lisU.uLag.value = 5/songDur;
+}
+
+// ---------- আরও মোড: গিঁট · মান্ডালা · ঘূর্ণি · জাল-গোলক · লিসাজু ----------
+const mkU = () => ({...U, uLag:{value:.03}, uTr:{value:.02}});
+const knotU = mkU(), manU = mkU(), vorU = mkU(), cageU = mkU(), lisU = mkU();
+const vsKnot = GH+`attribute vec2 aUV;
+vec3 knot(float t){float r=2.+cos(3.*t);return vec3(r*cos(2.*t),-sin(3.*t)*1.4,r*sin(2.*t));}
+void main(){
+  float ph=aUV.x*6.28318, ps=aUV.y*6.28318, f=abs(aUV.x*2.-1.);
+  float v=spec(uT-aUV.y*uLag,f);
+  vec3 c=knot(ph)*5., T=normalize(knot(ph+.02)*5.-c);
+  vec3 n1=normalize(vec3(cos(2.*ph),0.,sin(2.*ph))), n2=normalize(cross(T,n1)); n1=cross(n2,T);
+  vec3 p=c+(.45+v*3.4)*(cos(ps)*n1+sin(ps)*n2); p.xz=rot(uTime*.12)*p.xz;
+  vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.9+f*.15); vA=.25+v*.9; gl_PointSize=(1.3+v*3.5)*uPx*(70./-mv.z);
+}`;
+const vsMan = GH+`attribute vec2 aUV;
+void main(){
+  float a=aUV.x, th=aUV.y*6.28318, fold=abs(mod(th,.785398)-.392699)/.392699;
+  float v=spec(uT-a*uLag,fold*.9+.05);
+  float rad=(1.5+a*28.)*(1.+.3*v), y=v*7.*(1.-a*.45);
+  th+=a*.7+uTime*.05;
+  vec4 mv=modelViewMatrix*vec4(cos(th)*rad,y,sin(th)*rad,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.85+(1.-a)*.2); vA=pow(1.-a,.8)*(.2+v); gl_PointSize=(1.2+v*4.)*uPx*(70./-mv.z);
+}`;
+const vsVor = GH+`attribute vec2 aUV;
+void main(){
+  float a=aUV.x, f=abs(aUV.y*2.-1.), th=aUV.y*6.28318+a*7.+uTime*.5;
+  float v=spec(uT-a*uLag,f), rad=2.5+a*7.+v*5.;
+  vec4 mv=modelViewMatrix*vec4(cos(th)*rad,a*34.-4.,sin(th)*rad,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.9+a*.1); vA=pow(1.-a,1.1)*(.2+v); gl_PointSize=(1.2+v*3.5)*uPx*(70./-mv.z);
+}`;
+const vsCage = GH+`void main(){
+  vec3 d=normalize(position); float lon=atan(d.z,d.x)/6.28318+.5, lat=d.y*.5+.5;
+  float v=spec(uT-lat*uLag,abs(lon*2.-1.));
+  vec3 p=d*(5.+v*11.+sin(lon*40.+uTime*2.)*.15*uAmp); p.xz=rot(-uTime*.08)*p.xz;
+  vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
+  vC=pal(v*.9+lat*.1); vA=.15+v*.85; gl_PointSize=(1.3+v*3.5)*uPx*(70./-mv.z);
+}`;
+const vsLis = GH+`attribute vec2 aUV;
+void main(){
+  float a=aUV.x, t=uT-a*uLag, b=spec(t,.06), m=spec(t,.3), h=spec(t,.65), th=a*60.+uTime*.25;
+  vec3 p=vec3(sin(th+b*5.)*(3.+b*10.), cos(th*1.5+m*4.)*(3.+m*9.)*.8+2., sin(th*2.+h*3.)*(3.+h*9.));
+  p.xz=rot(uTime*.1)*p.xz;
+  vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
+  float e=(b+m+h)/3.; vC=pal(e*1.1+(1.-a)*.25); vA=pow(1.-a,1.4)*(.4+e); gl_PointSize=(1.4+e*4.+(1.-a)*2.)*uPx*(70./-mv.z);
+}`;
+function uvGrid(R, S, every){
+  const pu = [], lu = [];
+  for(let j=0;j<R;j++) for(let k=0;k<=S;k++) pu.push(j/(R-1), k/S);
+  for(let j=0;j<R;j++) for(let k=0;k<S;k++){
+    lu.push(j/(R-1),k/S, j/(R-1),(k+1)/S);
+    if(k%every===0 && j<R-1) lu.push(j/(R-1),k/S, (j+1)/(R-1),k/S);
+  }
+  return [geoFrom(pu.length/2,{aUV:[new Float32Array(pu),2]}), geoFrom(lu.length/2,{aUV:[new Float32Array(lu),2]})];
+}
+function pair(grid, vs, u){
+  return [addObj(new THREE.Points(grid[0], mk2(vs,fsPt2,u))), addObj(new THREE.LineSegments(grid[1], mk2(vs,fsLn2,u)))];
+}
+const [knotPts, knotLines] = pair(uvGrid(420, 10, 1), vsKnot, knotU);
+const [manPts, manLines]   = pair(uvGrid(130, 160, 8), vsMan, manU);
+const [vorPts, vorLines]   = pair(uvGrid(150, 120, 6), vsVor, vorU);
+const [lisPts, lisLines]   = (function(){
+  const N = 9000, pu = [], lu = [];
+  for(let i=0;i<N;i++){ pu.push(i/(N-1),0); if(i<N-1) lu.push(i/(N-1),0,(i+1)/(N-1),0); }
+  return pair([geoFrom(N,{aUV:[new Float32Array(pu),2]}), geoFrom(lu.length/2,{aUV:[new Float32Array(lu),2]})], vsLis, lisU);
+})();
+const cagePts = addObj(new THREE.Points(new THREE.IcosahedronGeometry(1,9), mk2(vsCage,fsPt2,cageU)));
+const cageLines = addObj(new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(1,13)), mk2(vsCage,fsLn2,cageU)));
+
+const MODES = [['mesh','🏔 মেশ'],['node','✨ নোড'],['orb','🔮 গোলক'],['galaxy','🌌 গ্যালাক্সি'],['rings','🌊 ঢেউ-বলয়'],['knot','🪢 গিঁট'],['mandala','🌸 মান্ডালা'],['vortex','🌪 ঘূর্ণি'],['cage','🕸 জাল-গোলক'],['lis','🧬 লিসাজু']];
+function applyMode(){
+  const groups = {
+    mesh:   solid ? [solid, wire, profLine, profGlow, profPts, base, sheet] : [],
+    node:   nodeObj ? [nodeObj, lineObj, headObj] : [],
+    orb:    [orbObj, coreObj],
+    galaxy: [galObj, galRing, coreObj],
+    rings:  [ringPts, ringLines, coreObj],
+    knot:   [knotPts, knotLines],
+    mandala:[manPts, manLines, coreObj],
+    vortex: [vorPts, vorLines, coreObj],
+    cage:   [cagePts, cageLines, coreObj],
+    lis:    [lisPts, lisLines, coreObj]
+  };
+  for(const k in groups) groups[k].forEach(o => o.visible = false);
+  if(solid) groups[mode].forEach(o => o.visible = true);   // গান লোড না হওয়া পর্যন্ত কিছু দেখাবে না
+  glowLight.visible = !!solid;
+  grid.visible = mode !== 'orb';
+  grid.material.opacity = ({mesh:.35, node:.18, galaxy:.12, rings:.15})[mode] || .1;
+  document.getElementById('bMode').textContent = '🎨 মোড: ' + MODES.find(m => m[0] === mode)[1];
+}
+function setView(){ zoomMul = 1; dist = CAM[mode].dd; elev = (CAM[mode].e[0]+CAM[mode].e[1])/2; wasAuto = false; idle = 99; }
+document.getElementById('bMode').onclick = () => {
+  mode = MODES[(MODES.findIndex(m => m[0] === mode)+1) % MODES.length][0];
+  applyMode(); setView();
+};
+
+// ---------- অডিও বিশ্লেষণ (পুরো গান একবারে) ----------
+const audio = document.getElementById('audio');
+const fileIn = document.getElementById('fileIn');
+const bPlay = document.getElementById('bPlay'), bRec = document.getElementById('bRec'), bFollow = document.getElementById('bFollow');
+const info = document.getElementById('info'), hint = document.getElementById('hint');
+const seek = document.getElementById('seek'), tm = document.getElementById('tm');
+let ctx, dest, wired = false, ENV = null, songDur = 0;
+
+function setup(){
+  if(!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if(!wired){
+    const src = ctx.createMediaElementSource(audio);
+    dest = ctx.createMediaStreamDestination();
+    src.connect(ctx.destination); src.connect(dest);
+    wired = true;
+  }
+}
+
+const N = 2048, LOG2N = 11;
+const win = new Float32Array(N), cosT = new Float32Array(N/2), sinT = new Float32Array(N/2), rev = new Uint16Array(N);
+for(let i=0;i<N;i++){ win[i] = .5-.5*Math.cos(2*Math.PI*i/(N-1)); let r=0; for(let b=0;b<LOG2N;b++) if(i&(1<<b)) r|=1<<(LOG2N-1-b); rev[i]=r; }
+for(let i=0;i<N/2;i++){ cosT[i]=Math.cos(2*Math.PI*i/N); sinT[i]=-Math.sin(2*Math.PI*i/N); }
+const re = new Float32Array(N), im = new Float32Array(N);
+function fft(){
+  for(let i=0;i<N;i++){ const j=rev[i]; if(j>i){ let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; } }
+  for(let size=2; size<=N; size<<=1){
+    const half=size>>1, step=N/size;
+    for(let s=0; s<N; s+=size) for(let k=0; k<half; k++){
+      const a=s+k, b=a+half, wr=cosT[k*step], wi=sinT[k*step];
+      const tr=re[b]*wr-im[b]*wi, ti=re[b]*wi+im[b]*wr;
+      re[b]=re[a]-tr; im[b]=im[a]-ti; re[a]+=tr; im[a]+=ti;
+    }
+  }
+}
+
+async function analyse(buf){
+  const len = buf.length, sr = buf.sampleRate, ch = buf.numberOfChannels;
+  const mono = new Float32Array(len);
+  for(let c=0;c<ch;c++){ const d = buf.getChannelData(c); for(let i=0;i<len;i++) mono[i] += d[i]/ch; }
+  const n60 = Math.floor(buf.duration*60), E = new Float32Array(n60), spf = sr/60;
+  for(let i=0;i<n60;i++){ let a=0; const s0=Math.floor(i*spf), e0=Math.min(len,Math.floor((i+1)*spf)); for(let j=s0;j<e0;j++) a+=mono[j]*mono[j]; E[i]=Math.sqrt(a/Math.max(1,e0-s0)); }
+  const srt = Float32Array.from(E).sort(), ref = srt[Math.floor(n60*.98)]||1e-6; let sm = 0;
+  for(let i=0;i<n60;i++){ sm += (Math.pow(Math.min(1,E[i]/ref),.6)-sm)*.5; E[i] = sm; }
+  ENV = E; songDur = buf.duration;
+  T = Math.min(720, Math.max(200, Math.ceil(buf.duration*6)));
+  const binHz = sr/N, fmin = 40, fmax = Math.min(16000, sr/2-100);
+  const lo = new Int32Array(F), hi = new Int32Array(F), tilt = new Float32Array(F);
+  for(let f=0; f<F; f++){
+    const a = fmin*Math.pow(fmax/fmin, f/F), b = fmin*Math.pow(fmax/fmin, (f+1)/F);
+    lo[f] = Math.floor(a/binHz); hi[f] = Math.max(lo[f]+1, Math.ceil(b/binHz));
+    tilt[f] = 3*Math.log2(Math.sqrt(a*b)/100);
+  }
+  const G = new Float32Array(T*F);
+  let mx = -1e9;
+  for(let k=0;k<T;k++){
+    const centre = Math.floor(k/(T-1)*(len-1)), st = centre-N/2;
+    for(let i=0;i<N;i++){ const p = st+i; re[i] = (p>=0&&p<len ? mono[p] : 0)*win[i]; im[i] = 0; }
+    fft();
+    for(let f=0; f<F; f++){
+      let s = 0; for(let b=lo[f]; b<hi[f]; b++) s += Math.hypot(re[b], im[b]);
+      const db = 20*Math.log10(s/(hi[f]-lo[f])/N*2 + 1e-9) + tilt[f];
+      G[k*F+f] = db; if(db>mx) mx = db;
+    }
+    if(k%40===0){ info.textContent = 'বিশ্লেষণ হচ্ছে… ' + Math.round(k/T*100) + '%'; await new Promise(r => setTimeout(r)); }
+  }
+  const RANGE = 62, floor = mx-RANGE;
+  for(let i=0;i<G.length;i++){ const v = Math.min(1, Math.max(0, (G[i]-floor)/RANGE)); G[i] = Math.pow(v, 1.7); }
+  const S = new Float32Array(G.length);          // সময় বরাবর হালকা মসৃণ
+  for(let k=0;k<T;k++) for(let f=0;f<F;f++){
+    const a = G[Math.max(0,k-1)*F+f], b = G[k*F+f], c2 = G[Math.min(T-1,k+1)*F+f];
+    S[k*F+f] = .25*a+.5*b+.25*c2;
+  }
+  return S;
+}
+
+fileIn.onchange = async () => {
+  const f = fileIn.files[0]; if(!f) return;
+  audio.pause(); bPlay.textContent = '▶ চালান'; bPlay.disabled = bRec.disabled = seek.disabled = true;
+  hint.style.opacity = 0;
+  try{
+    setup();
+    info.textContent = 'ফাইল পড়া হচ্ছে…';
+    const buf = await ctx.decodeAudioData(await f.arrayBuffer());
+    const G = await analyse(buf);
+    buildMesh(G); buildNodes(G); makeSpecTex(G); applyMode();
+    audio.src = URL.createObjectURL(f);
+    info.textContent = f.name;
+    bPlay.disabled = bRec.disabled = seek.disabled = false;
+    setView();
+  }catch(e){
+    console.error(e); info.textContent = 'ফাইলটি পড়া যায়নি — অন্য একটি MP3 চেষ্টা করুন';
+    hint.style.opacity = 1;
+  }
+};
+
+async function play(){
+  setup(); await ctx.resume();
+  if(audio.paused){ await audio.play(); bPlay.textContent = '⏸ থামান'; }
+  else { audio.pause(); bPlay.textContent = '▶ চালান'; }
+}
+bPlay.onclick = play;
+
+function fmt(s){ s = Math.max(0, s|0); return (s/60|0) + ':' + String(s%60).padStart(2,'0'); }
+let seeking = false;
+seek.addEventListener('pointerdown', () => seeking = true);
+addEventListener('pointerup', () => seeking = false);
+seek.addEventListener('input', () => { if(audio.duration) audio.currentTime = seek.value/1000*audio.duration; });
+
+// ---------- ক্যামেরা ----------
+let ang = 0.5, elev = 0.5, dist = 70, followOn = true, tx = 0, drag = false, px = 0, py = 0, moved = 0;
+bFollow.onclick = () => { followOn = !followOn; bFollow.classList.toggle('on', followOn); };
+const bCine = document.getElementById('bCine');
+bCine.onclick = () => { cine = !cine; bCine.classList.toggle('on', cine); wasAuto = false; idle = 99; };
+cv.addEventListener('pointerdown', e => { drag = true; moved = 0; px = e.clientX; py = e.clientY; });
+addEventListener('pointerup', e => {
+  if(drag && moved < 5 && e.target === cv) clickSeek(e);
+  drag = false;
+});
+addEventListener('pointermove', e => {
+  if(!drag) return;
+  moved += Math.abs(e.clientX-px)+Math.abs(e.clientY-py);
+  ang -= (e.clientX-px)*0.005;
+  elev = Math.min(1.45, Math.max(0.08, elev + (e.clientY-py)*0.005));
+  px = e.clientX; py = e.clientY;
+});
+cv.addEventListener('wheel', e => { e.preventDefault(); zoomMul = Math.min(2.4, Math.max(.4, zoomMul + e.deltaY*0.0012)); }, {passive:false});
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  cam.aspect = innerWidth/innerHeight; cam.updateProjectionMatrix();
+});
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function clickSeek(e){
+  if(!solid || !audio.duration) return;
+  ndc.set(e.clientX/innerWidth*2-1, -(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(ndc, cam);
+  if(mode !== 'mesh' && mode !== 'node' && mode !== 'galaxy') return;
+  if(mode === 'galaxy'){
+    const v = new THREE.Vector3();
+    if(ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0), v)) audio.currentTime = Math.min(1, Math.max(0, (Math.hypot(v.x,v.z)-2.5)/34)) * audio.duration;
+    return;
+  }
+  if(mode === 'node'){
+    const v = new THREE.Vector3();
+    if(ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,0,1),0), v)) audio.currentTime = Math.min(1, Math.max(0, (v.x+LEN/2)/LEN)) * audio.duration;
+    return;
+  }
+  const hit = ray.intersectObject(solid)[0];
+  if(hit){ audio.currentTime = Math.min(1, Math.max(0, (hit.point.x+LEN/2)/LEN)) * audio.duration; }
+}
+
+// ---------- রেকর্ড ও ডাউনলোড ----------
+let mr, chunks = [];
+bRec.onclick = async () => {
+  if(mr && mr.state === 'recording'){ mr.stop(); return; }
+  setup(); await ctx.resume();
+  const stream = cv.captureStream(30);
+  dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  const mt = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  mr = new MediaRecorder(stream, {mimeType: mt, videoBitsPerSecond: 6e6});
+  chunks = [];
+  mr.ondataavailable = e => e.data.size && chunks.push(e.data);
+  mr.onstop = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(chunks, {type:'video/webm'}));
+    a.download = 'sound-3d.webm'; a.click();
+    bRec.textContent = '⏺ রেকর্ড শুরু'; bRec.classList.remove('on');
+  };
+  mr.start();
+  bRec.textContent = '⏹ থামান ও ডাউনলোড'; bRec.classList.add('on');
+  if(audio.paused) play();
+};
+audio.onended = () => {
+  bPlay.textContent = '▶ চালান';
+  if(mr && mr.state === 'recording') mr.stop();
+};
+
+
+// ---------- সিনেমাটিক ক্যামেরা: স্বয়ংক্রিয় "শট", বিটে ঝাঁকুনি/জুম, ডলি-জুম, ব্যাংকিং ----------
+const CAM = {
+  mesh:{d:[24,46],e:[.14,.8],y:2,dd:34},   node:{d:[18,40],e:[.15,.9],y:5,dd:34},
+  orb:{d:[17,34],e:[-.15,.7],y:0,dd:28},   galaxy:{d:[30,62],e:[.25,1.15],y:0,dd:56},
+  rings:{d:[28,56],e:[.15,.95],y:2,dd:48}, knot:{d:[20,38],e:[-.2,.7],y:0,dd:32},
+  mandala:{d:[28,56],e:[.3,1.2],y:1,dd:50},vortex:{d:[30,60],e:[-.05,.6],y:12,dd:55},
+  cage:{d:[17,34],e:[-.2,.7],y:0,dd:28},   lis:{d:[22,42],e:[-.1,.75],y:2,dd:34}
+};
+let cine = true, wasAuto = false, zoomMul = 1, idle = 99, shotT = 0, shotDur = 10, kick = 0, slow = 0, fovNow = 50, roll = 0, ly = 2, tClock = 0, lastNow = performance.now();
+const sh = {d0:34, d1:30, e0:.5, e1:.5, spin:.06};
+function newShot(){
+  const C = CAM[mode], r = Math.random, rg = (a,b) => a+(b-a)*r();
+  const k = ['push','pull','orbit','crane','low'][(r()*5)|0];
+  sh.d0 = dist/zoomMul; sh.e0 = elev; shotT = 0; shotDur = rg(8,14);
+  sh.spin = (r()<.5 ? -1 : 1)*rg(.04,.13);
+  sh.d1 = rg(C.d[0], C.d[1]); sh.e1 = rg(C.e[0], C.e[1]);
+  if(k==='push'){ sh.d1 = C.d[0] + (C.d[1]-C.d[0])*.15*r(); }
+  if(k==='pull'){ sh.d1 = C.d[1]*(.85+.15*r()); }
+  if(k==='crane'){ sh.e1 = elev > (C.e[0]+C.e[1])/2 ? rg(C.e[0], C.e[0]+.25) : rg(C.e[1]-.25, C.e[1]); sh.spin *= .5; }
+  if(k==='low'){ sh.e1 = C.e[0]+.05*r(); sh.d1 = C.d[0]+(C.d[1]-C.d[0])*.3; }
+}
+function cinema(smoothX){
+  const now = performance.now(), dt = Math.min(.05, (now-lastNow)/1000); lastNow = now; tClock += dt;
+  const C = CAM[mode], follow = mode === 'mesh' || mode === 'node', wide = follow && !followOn ? 1.9 : 1;
+  if(drag) idle = 0; else idle += dt;
+  const auto = cine && idle > 3;
+  if(auto && !wasAuto) newShot();
+  wasAuto = auto;
+  slow += (ampS-slow)*Math.min(1, dt*1.5);               // বিট শনাক্ত: হঠাৎ জোরালো হলে কিক
+  if(ampS-slow > .07 && kick < .5) kick = 1;
+  kick *= Math.exp(-dt*5);
+  const k = 1-Math.exp(-dt*2.2), k2 = 1-Math.exp(-dt*3);
+  let dT = C.dd;
+  if(auto){
+    shotT += dt; if(shotT > shotDur) newShot();
+    const q = Math.min(1, shotT/shotDur), e = q*q*(3-2*q);
+    dT = sh.d0 + (sh.d1-sh.d0)*e;
+    elev += ((sh.e0 + (sh.e1-sh.e0)*e) - elev)*k;
+    if(!reduce) ang += sh.spin*dt;
+  } else if(!drag && !reduce && !cine) ang += .15*dt;
+  dist += (dT*zoomMul*wide - dist)*k;
+  elev = Math.min(1.45, Math.max(-.35, elev));
+  const wantX = follow && followOn ? smoothX + 3 : 0;      // খেলার একটু সামনে তাকায়
+  tx += (wantX-tx)*k2; ly += (C.y-ly)*k2;
+  const dE = dist*(1-kick*.05), sk = reduce ? 0 : (.03+ampS*.09)*(1+dist*.02);
+  cam.position.set(
+    tx + Math.sin(ang)*dE*Math.cos(elev) + Math.sin(tClock*1.7)*sk,
+    Math.sin(elev)*dE + Math.sin(tClock*2.3)*sk + Math.sin(tClock*.4)*.35,
+    Math.cos(ang)*dE*Math.cos(elev) + Math.sin(tClock*1.1)*sk);
+  const fT = 44 + Math.max(0, 40-dist)*.45 + kick*3;       // কাছে এলে ওয়াইড — ডলি-জুম অনুভূতি
+  fovNow += (fT-fovNow)*k;
+  if(Math.abs(cam.fov-fovNow) > .02){ cam.fov = fovNow; cam.updateProjectionMatrix(); }
+  cam.lookAt(tx, ly, 0);
+  roll += ((auto && !reduce ? sh.spin*.35 : 0) + Math.sin(tClock*.17)*.025 - roll)*k;
+  cam.rotateZ(roll);
+}
+
+// ---------- অ্যানিমেশন ----------
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let smoothX = 0, pulse = 0, ampS = 0;
+function frame(){
+  requestAnimationFrame(frame);
+  const dur = audio.duration || 0;
+  let frac = dur ? audio.currentTime/dur : 0;
+  const x = (frac-.5)*LEN;
+  smoothX += (x-smoothX)*.35;
+
+  if(mode === 'mesh' && solid){
+    const u = frac*(T-1), i0 = Math.min(T-2, Math.floor(u)), k = u-i0;
+    let sum = 0;
+    for(let iy=0; iy<F; iy++){
+      const h = Hh[iy*T+i0]*(1-k) + Hh[iy*T+i0+1]*k;
+      prof[iy*3] = smoothX; prof[iy*3+1] = h; prof[iy*3+2] = -WID/2 + iy*WID/(F-1);
+      sum += h;
+    }
+    profGeo.attributes.position.needsUpdate = true;
+    profGeo.computeBoundingSphere();
+    const lvl = sum/F/MAXH;
+    pulse += (lvl-pulse)*.25;
+    sheet.position.x = base.position.x = smoothX;
+    glowLight.position.set(smoothX, 5, 0);
+    glowLight.intensity = 1.6 + pulse*7;
+    sheetMat.opacity = .07 + pulse*.5;
+  } else if(mode === 'node' && NP){
+    const u = frac*(NP.n-1), i0 = Math.min(NP.n-2, Math.floor(u)), k = u-i0, P = NP.P;
+    nodeU.uHead.value = u;
+    const hp = headObj.geometry.attributes.position;
+    for(let q=0;q<3;q++) hp.array[q] = P[i0*3+q]*(1-k) + P[(i0+1)*3+q]*k;
+    hp.needsUpdate = true;
+    const a = NP.A[i0]; pulse += (a-pulse)*.3;
+    headObj.material.size = 20 + pulse*26;
+    glowLight.position.set(hp.array[0], hp.array[1], hp.array[2]);
+    glowLight.intensity = 1 + pulse*5;
+  }
+
+  const ei = ENV ? Math.min(ENV.length-1, (audio.currentTime*60)|0) : 0;
+  ampS += ((ENV ? ENV[ei] : 0) - ampS)*.3;
+  U.uT.value = frac; U.uTime.value = performance.now()/1000; U.uAmp.value = ampS;
+  if(mode === 'galaxy'){ const r = 2.5+frac*34; galRing.scale.set(r,1,r); }
+  coreObj.material.size = (mode === 'orb' ? 70 : 42) + ampS*90;
+  cinema(smoothX);
+
+  if(dur){
+    tm.textContent = fmt(audio.currentTime) + ' / ' + fmt(dur);
+    if(!seeking) seek.value = frac*1000;
+    seek.style.setProperty('--p', (frac*100)+'%');
+  }
+  renderer.render(scene, cam);
+}
+frame();
+</script>
+</body></html>
